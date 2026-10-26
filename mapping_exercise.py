@@ -141,6 +141,109 @@ def inverse_bwt(bwt_str):
     # Reversing the collected string and add the terminal $
     return "".join(reversed(text_rev)) + "$"
 
+# =-=-=-=-=-=-=-=-= Task 3 =-=-=-=-=-=-=-=-=
+class FMIndex:
+    def __init__(self, text, s):
+        """
+        Builds the FM-index for a given text and sampling step s.
+        :param text:
+        :param s:
+        """
+
+        self.s = s
+        # Buidling the suffix array once, using it, and discarding it to save memory
+        sa = suffix_array(text)
+
+        # BWT & first occurence
+        self.bwt = bwt(text, sa)
+        self.first_occurrence = first_occurrence(self.bwt)
+
+        # Samples suffix array
+            # Keeping only the rows where the original text pos is a multiple of s
+        self.sampled = {row: pos for row, pos in enumerate(sa) if pos % s == 0}
+
+        # Counting array
+            # counts[X][i] is the num of times letter X appears in self.bwt[:i]
+        unique_chars = set(self.bwt)
+        # Initialising the lists with zeros (length is len(bwt) + 1)
+        self.counts = {char: [0] * (len(self.bwt) + 1) for char in unique_chars}
+
+        # Populating counts in a single class
+        for i, char in enumerate(self.bwt):
+            # Carrying over all counts form the previous step
+            for c in unique_chars:
+                self.counts[c][i+1] = self.counts[c][i]
+            # Increment the count for the specific char it just saw
+            self.counts[char][i+1] += 1
+
+
+    def lf(self, row):
+        """
+        Last-to-first mapping -> returns the row of the suffix that starts one
+        position earlier in the original text.
+        :param self:
+        :param row:
+        :return:
+        """
+
+        char = self.bwt[row]
+        return self.first_occurrence[char] + self.counts[char][row]
+
+    def count(self, p):
+        """
+        Backward search to find the [top, bottom) interval of rows that start with pattern p.
+        :param self:
+        :param p:
+        :return:
+        """
+
+        top = 0
+        bottom = len(self.bwt)
+
+        # Searching backwards through the pattern
+        for char in reversed(p):
+            # If the char isnt even in the text, the patter doesnt exist
+            if char not in self.first_occurrence:
+                return (top, top)
+
+            # Updating boundaries using the first occurrence and counts array
+            top = self.first_occurrence[char] + self.counts[char][top]
+            bottom = self.first_occurrence[char] + self.counts[char][bottom]
+
+            # If the interval becomes empty, the pattern doesnt exist
+            if top == bottom:
+                return (top, top)
+
+
+        return top, bottom
+
+    def locate(self, p):
+        """
+        Finds the actual text positions of all occurrences of p.
+        :param self:
+        :param p:
+        :return:
+        """
+
+        top, bottom = self.count(p)
+        positions = []
+
+        for row in range(top, bottom):
+            curr_row = row
+            steps = 0
+
+            # Stepping backwards through the text using LF mapping until hitting a checkpoint
+            while curr_row not in self.sampled:
+                curr_row = self.lf(curr_row)
+                steps += 1
+
+            # The original pos is the checkpoint pos + the steps taken
+            actual_pos = self.sampled[curr_row] + steps
+            positions.append(actual_pos)
+
+        return positions
+
+
 
 
 
@@ -197,8 +300,25 @@ if __name__ == '__main__':
     print(f"Recovered text: {recovered}")
     print(f"Matches original? {recovered == test_text}")
 
+    print("\n=-=-=-=-=-=-=-=-= TASK 3 =-=-=-=-=-=-=-=-=")
+    fm = FMIndex("CAT$", 2)
 
+    print("FMIndex for CAT$ (s=2):")
+    print(f"BWT: {fm.bwt}")
+    print(f"Counts for 'T': {fm.counts['T']}")
+    print(f"Sampled SA: {fm.sampled}")
 
+    # Test LF mapping (row 1 is AT$, row 2 is CAT$)
+    print(f"\n LF mapping for row 1: {fm.lf(1)} (Expected: 2)")
+
+    # Testing backward search count
+    pattern = "AT"
+    top, bottom = fm.count(pattern)
+    print(f"Count for '{pattern}': ({top}, {bottom}) (Expected: (1, 2))")
+
+    # testing locate
+    locations = fm.locate(pattern)
+    print(f"Locate '{pattern}': {locations} (Expected: [1]")
 
 
 
