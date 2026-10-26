@@ -244,7 +244,109 @@ class FMIndex:
         return positions
 
 
+# =-=-=-=-=-=-=-=-= Task 4 =-=-=-=-=-=-=-=-=
+def reverse_complement(seq):
+    """
+    Returns the reverse complement of a DNA sequence.
+    :param seq:
+    :return:
+    """
+    complement = {"A": "T",
+                  "C": "G",
+                  "G": "C",
+                  "T": "A"}
+    # Reversing the string and swapping the bases
+    return "".join(complement[base] for base in reversed(seq))
 
+
+def hamming(a, b):
+    """
+    Returns the number of mismatches between two equal-length strings.
+    :param a:
+    :param b:
+    :return:
+    """
+    assert len(a) == len(b), "Strings must be exactly the same length"
+    return sum(1 for x, y in zip(a, b) if x != y)
+
+
+def seeds(read, n):
+    """
+    Cuts a read into n consecutive, nearly equal seeds.
+    Returns a list of tuples: (offset, seed_string)
+    :param read:
+    :param n:
+    :return:
+    """
+    seed_list = []
+    length = len(read)
+
+    for i in range(n):
+        # Calc start and end indices for each chunk
+        start = i * length // n
+        end = (i + 1) * length // n
+        seed_list.append((start, read[start:end]))
+
+    return seed_list
+
+
+def map_read(read, fm, ref, d=2, n_seeds=None):
+    """
+    Maps a read (and its reverse complement) to the reference using the FM-index.
+    Returns a sorted list of hits (strand, position, mismatches) and the total candidates checked.
+    :param read:
+    :param fm:
+    :param ref:
+    :param d:
+    :param n_seeds:
+    :return:
+    """
+    if n_seeds is None:
+        n_seeds = d + 1
+
+    hits = []
+    total_candidates = 0
+
+    # Checking both the forward strand (+) and reverse complement (-)
+    for strand, seq in [("+", read), ("-", reverse_complement(read))]:
+        candidates = set()
+
+        # Using the Pigeonhole principle to find candidate start positions
+        for offset, seed in seeds(seq, n_seeds):
+            # Locating exact matches of the short seed using FM-index
+            for pos in fm.locate(seed):
+                start_pos = pos - offset
+
+                # Discarding candidates that would cause the read to stick out of the genome
+                if 0 <= start_pos <= len(ref) - len(seq):
+                    candidates.add(start_pos)
+
+        # Verifying each candidate start position with full Hamming distance
+        total_candidates += len(candidates)
+        for start_pos in candidates:
+            mismatches = hamming(seq, ref[start_pos:start_pos + len(seq)])
+            if mismatches <= d:
+                hits.append((strand, start_pos, mismatches))
+
+    return sorted(hits), total_candidates
+
+
+def brute_map(read, ref, d=2):
+    """
+    Slowly maps a read to the reference by checking every possible start position.
+    Used for self-checking against map_read.
+    :param read:
+    :param ref:
+    :param d:
+    :return:
+    """
+    hits = []
+    for strand, seq in [("+", read), ("-", reverse_complement(read))]:
+        for i in range(len(ref) - len(seq) + 1):
+            mismatches = hamming(seq, ref[i:i + len(seq)])
+            if mismatches <= d:
+                hits.append((strand, i, mismatches))
+    return sorted(hits)
 
 
 
@@ -319,6 +421,54 @@ if __name__ == '__main__':
     # testing locate
     locations = fm.locate(pattern)
     print(f"Locate '{pattern}': {locations} (Expected: [1]")
+
+    # =-=-=-=-=-=-=-=-= Task 4 =-=-=-=-=-=-=-=-=
+    from Bio import SeqIO
+    import time
+
+    print("\n=-=-=-=-=-=-=-=-= TASK 4 =-=-=-=-=-=-=-=-=")
+    try:
+        # Loading the files
+        ref_record = SeqIO.read("reference.fasta", "fasta")
+        ref = str(ref_record.seq)
+
+        reads = [str(record.seq) for record in SeqIO.parse("reads.fasta", "fasta")]
+        print(f"Loaded reference ({len(ref)} bp) and {len(reads)} reads.")
+
+        # Building the FMIndex
+        print("\nBuilding FM-index...")
+        start_time = time.time()
+        # The reference must end with $ -> using a sampling step of 32
+        fm = FMIndex(ref + "$", 32)
+        print(f"FM-index built in {time.time() - start_time:.2f} seconds.")
+
+        # Mapping all reads
+        mapped_count = 0
+        unmapped_count = 0
+        multi_hit_count = 0
+
+        print("\nHits for the first 5 reads:")
+        for i, read in enumerate(reads):
+            hits, candidates = map_read(read, fm, ref)
+
+            if not hits:
+                unmapped_count += 1
+            else:
+                mapped_count += 1
+                if len(hits) > 1:
+                    multi_hit_count += 1
+
+            # Printing the hits of the first five reads
+            if i < 5:
+                print(f"Read {i + 1}: {hits}")
+
+        print(f"\n Mapping Summary ")
+        print(f"Total mapped reads:   {mapped_count}")
+        print(f"\tMulti-hit reads: {multi_hit_count}")
+        print(f"Unmapped reads:       {unmapped_count}")
+
+    except FileNotFoundError as e:
+        print(f"File Error: {e}. Please ensure 'reference.fasta' and 'reads.fasta' are in the same folder.")
 
 
 
